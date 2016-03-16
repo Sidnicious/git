@@ -37,12 +37,11 @@ static int send_request(const char *socket, const struct strbuf *out)
 
 static void spawn_daemon(const char *socket)
 {
-	struct child_process daemon;
+	struct child_process daemon = CHILD_PROCESS_INIT;
 	const char *argv[] = { NULL, NULL, NULL };
 	char buf[128];
 	int r;
 
-	memset(&daemon, 0, sizeof(daemon));
 	argv[0] = "git-credential-cache--daemon";
 	argv[1] = socket;
 	daemon.argv = argv;
@@ -71,11 +70,14 @@ static void do_cache(const char *socket, const char *action, int timeout,
 			die_errno("unable to relay credential");
 	}
 
-	if (!send_request(socket, &buf))
-		return;
-	if (flags & FLAG_SPAWN) {
-		spawn_daemon(socket);
-		send_request(socket, &buf);
+	if (send_request(socket, &buf) < 0) {
+		if (errno != ENOENT && errno != ECONNREFUSED)
+			die_errno("unable to connect to cache daemon");
+		if (flags & FLAG_SPAWN) {
+			spawn_daemon(socket);
+			if (send_request(socket, &buf) < 0)
+				die_errno("unable to connect to cache daemon");
+		}
 	}
 	strbuf_release(&buf);
 }
@@ -86,7 +88,7 @@ int main(int argc, const char **argv)
 	int timeout = 900;
 	const char *op;
 	const char * const usage[] = {
-		"git credential-cache [options] <action>",
+		"git credential-cache [<options>] <action>",
 		NULL
 	};
 	struct option options[] = {
